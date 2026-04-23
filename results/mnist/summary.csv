@@ -1,5 +1,5 @@
 system,error_%,time_s
-full_nn,3.0900,1.127003
-clustered_nn,4.6500,0.020468
-clustered_knn_k7,5.7400,0.090143
-kmeans_preprocessing,,3.253238
+full_nn,3.0900,9.857446
+clustered_nn,4.6400,0.117836
+clustered_knn_k7,5.7200,0.407205
+kmeans_preprocessing,,19.767153

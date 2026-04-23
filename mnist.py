@@ -152,7 +152,7 @@ def plot_examples(vectors, true_labels, pred_labels, indices, path, title, max_i
 		ax.set_title(f"i={idx} t={true_labels[idx]} p={pred_labels[idx]}", fontsize=8)
 		ax.axis("off")
 	fig.suptitle(title)
-	fig.tight_layout(rect=(0, 0, 1, 0.95))
+	fig.tight_layout(rect=(0, 0, 1, 0.95), h_pad=3.0)
 	fig.savefig(path, dpi=150)
 	plt.close(fig)
 
