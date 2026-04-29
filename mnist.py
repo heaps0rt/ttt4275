@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import csv
 import math
@@ -19,6 +17,7 @@ NUM_CLASSES = 10
 
 
 def read_idx_images(path: Path) -> np.ndarray:
+	# Read MNIST images from the IDX file. Each image is returned as a flat row of pixels.
 	with path.open("rb") as f:
 		magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
 		if magic != 2051:
@@ -27,6 +26,7 @@ def read_idx_images(path: Path) -> np.ndarray:
 
 
 def read_idx_labels(path: Path) -> np.ndarray:
+	# Read MNIST labels (0-9) from the IDX file.
 	with path.open("rb") as f:
 		magic, count = struct.unpack(">II", f.read(8))
 		if magic != 2049:
@@ -38,6 +38,7 @@ def read_idx_labels(path: Path) -> np.ndarray:
 
 
 def load_mnist(data_dir: Path):
+	# Use the .mat file from the project if it is there, otherwise read the raw IDX files.
 	mat_path = data_dir / "data_all.mat"
 	if mat_path.exists():
 		data = loadmat(mat_path)
@@ -56,12 +57,16 @@ def load_mnist(data_dir: Path):
 
 
 def confusion_matrix(y_true, y_pred, n_classes):
+	# cm[i, j] = number of samples with true class i predicted as class j.
 	cm = np.zeros((n_classes, n_classes), dtype=np.int64)
 	np.add.at(cm, (y_true, y_pred), 1)
 	return cm
 
 
 def chunked_sqdist(test, templates, chunk_size):
+	# Squared distance from each test sample to every template, processed in chunks
+	# so the full distance matrix never has to fit in memory at once.
+	# Negative values from rounding errors are clamped to zero.
 	n = test.shape[0]
 	tnorm = np.sum(templates * templates, axis=1)
 	tT = templates.T
@@ -75,6 +80,7 @@ def chunked_sqdist(test, templates, chunk_size):
 
 
 def predict_nn(templates, template_labels, test, chunk_size):
+	# 1-NN: each test sample takes the label of the closest template.
 	n = test.shape[0]
 	preds = np.empty(n, dtype=np.int64)
 	for start, end, d in chunked_sqdist(test, templates, chunk_size):
@@ -83,6 +89,8 @@ def predict_nn(templates, template_labels, test, chunk_size):
 
 
 def knn_vote(labels, distances, n_classes):
+	# Pick the most common label among the K neighbours.
+	# If two classes tie, the one with the smaller average distance wins.
 	counts = np.bincount(labels, minlength=n_classes)
 	top = counts.max()
 	tied = np.flatnonzero(counts == top)
@@ -97,6 +105,8 @@ def knn_vote(labels, distances, n_classes):
 
 
 def predict_knn(templates, template_labels, test, k, chunk_size, n_classes):
+	# K-NN: take the K closest templates per test sample and let knn_vote decide.
+	# argpartition is used instead of sorting because we only need the K smallest, not them in order.
 	n = test.shape[0]
 	preds = np.empty(n, dtype=np.int64)
 	k_eff = min(k, templates.shape[0])
@@ -110,6 +120,8 @@ def predict_knn(templates, template_labels, test, k, chunk_size, n_classes):
 
 
 def cluster_templates(trainv, trainlab, m_per_class, seed):
+	# Replace each class's training images with M k-means cluster centres.
+	# This gives a much smaller template set, which makes NN/KNN run a lot faster.
 	vectors, labels = [], []
 	for c in range(NUM_CLASSES):
 		cls = trainv[trainlab == c]
@@ -137,6 +149,7 @@ def write_cm_csv(path, cm):
 
 
 def plot_examples(vectors, true_labels, pred_labels, indices, path, title, max_images):
+	# Show a small grid of digit images with their true and predicted labels.
 	if indices.size == 0:
 		return
 	selected = indices[:max_images]
@@ -158,6 +171,7 @@ def plot_examples(vectors, true_labels, pred_labels, indices, path, title, max_i
 
 
 def plot_cluster_grid(templates, path, m_per_class, per_class=8):
+	# Show the first few cluster centres for every class as images.
 	fig, axes = plt.subplots(
 		NUM_CLASSES, per_class, figsize=(per_class * 1.2, NUM_CLASSES * 1.2)
 	)
@@ -205,7 +219,7 @@ def main():
 		testv, testlab = testv[: args.max_test], testlab[: args.max_test]
 	print(f"train {trainv.shape}, test {testv.shape}")
 
-	# Task 1: full-template NN
+	# Task 1: 1-NN against the full 60k training set as templates.
 	print("\n=== Task 1: full-template NN ===")
 	t0 = time.perf_counter()
 	full_pred = predict_nn(trainv, trainlab, testv, args.chunk_size)
@@ -224,7 +238,7 @@ def main():
 	              args.figures_dir / "correct_nn.png",
 	              "Correctly classified (full-template NN)", args.max_plots)
 
-	# Task 2: clustered templates + NN/KNN
+	# Task 2: replace each class's 6000 templates with M k-means centroids, then run 1-NN and K-NN.
 	print("\n=== Task 2: clustered NN and KNN ===")
 	t0 = time.perf_counter()
 	templates, template_labels = cluster_templates(

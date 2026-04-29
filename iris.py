@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import csv
 from dataclasses import dataclass
@@ -28,6 +26,7 @@ class Trained:
 
 
 def load_iris(path: Path) -> tuple[np.ndarray, np.ndarray]:
+	# Parse iris.data: 4 feature floats + class name per line; map names to 0/1/2.
 	label_to_index = {name: i for i, name in enumerate(CLASS_NAMES)}
 	features, labels = [], []
 	for line in path.read_text(encoding="utf-8").splitlines():
@@ -43,6 +42,9 @@ def load_iris(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 
 def classwise_split(x, y, train_per_class, from_start):
+	# Take the same number of samples from every class so the split is balanced.
+	# from_start=True  -> first N per class for training (Split A).
+	# from_start=False -> last  N per class for training (Split B).
 	train_idx, test_idx = [], []
 	for c in range(len(CLASS_NAMES)):
 		idx = np.where(y == c)[0]
@@ -58,6 +60,8 @@ def classwise_split(x, y, train_per_class, from_start):
 
 
 def standardize(x_train, x_test):
+	# Center and scale features using only the training set's mean/std.
+	# The std==0 guard avoids dividing by zero if a feature is constant.
 	mean = x_train.mean(axis=0)
 	std = x_train.std(axis=0)
 	std[std == 0.0] = 1.0
@@ -65,12 +69,14 @@ def standardize(x_train, x_test):
 
 
 def one_hot(y, n_classes):
+	# Turn class labels into target rows: a 1 in the true-class column, 0 elsewhere.
 	t = np.zeros((y.size, n_classes), dtype=np.float64)
 	t[np.arange(y.size), y] = 1.0
 	return t
 
 
 def sigmoid(z):
+	# Sigmoid written to avoid overflow on large positive or negative inputs.
 	out = np.empty_like(z, dtype=np.float64)
 	pos = z >= 0
 	out[pos] = 1.0 / (1.0 + np.exp(-z[pos]))
@@ -80,14 +86,18 @@ def sigmoid(z):
 
 
 def add_bias(x):
+	# Add a column of 1s so the bias term can be stored in the weight matrix.
 	return np.hstack((x, np.ones((x.shape[0], 1), dtype=x.dtype)))
 
 
 def predict(W, x):
+	# Pick the class with the largest output for each sample.
 	return np.argmax(add_bias(x) @ W, axis=1)
 
 
 def train(x, y, alphas, max_epochs, tol):
+	# Linear classifier with sigmoid output, trained by minimising MSE.
+	# Tries each step size and keeps the one with the lowest final training error.
 	n_classes = len(CLASS_NAMES)
 	xb = add_bias(x)
 	t = one_hot(y, n_classes)
@@ -104,17 +114,21 @@ def train(x, y, alphas, max_epochs, tol):
 			z = xb @ W
 			g = sigmoid(z)
 			diff = g - t
+			# Mean-square error summed over samples and classes.
 			mse = 0.5 * float(np.sum(diff * diff))
+			# If training diverged, drop this step size.
 			if not np.isfinite(mse) or mse > 1e10:
 				break
 			err = float(np.mean(np.argmax(z, axis=1) != y))
 			mse_hist.append(mse)
 			err_hist.append(err)
 
+			# Stop once the MSE barely changes; the warmup keeps us from stopping too early.
 			if len(mse_hist) > 20 and abs(prev_mse - mse) < tol:
 				converged = True
 				break
 
+			# Gradient step. The g*(1-g) factor is the derivative of the sigmoid.
 			W -= alpha * (xb.T @ (diff * g * (1.0 - g)))
 			prev_mse = mse
 
@@ -130,12 +144,14 @@ def train(x, y, alphas, max_epochs, tol):
 
 
 def confusion_matrix(y_true, y_pred, n_classes):
+	# cm[i, j] = number of samples with true class i predicted as class j.
 	cm = np.zeros((n_classes, n_classes), dtype=np.int64)
 	np.add.at(cm, (y_true, y_pred), 1)
 	return cm
 
 
 def evaluate(x_train, y_train, x_test, y_test, alphas, max_epochs, tol):
+	# Standardise, train, and report errors and confusion matrices on both sets.
 	x_train_s, x_test_s = standardize(x_train, x_test)
 	trained = train(x_train_s, y_train, alphas, max_epochs, tol)
 	train_pred = predict(trained.W, x_train_s)
@@ -150,8 +166,11 @@ def evaluate(x_train, y_train, x_test, y_test, alphas, max_epochs, tol):
 
 
 def feature_overlap(x, y, bins):
+	# Score how much the class histograms overlap for each feature.
+	# Lower score = the classes are more separated on that feature.
 	scores = np.zeros(x.shape[1])
 	for j in range(x.shape[1]):
+		# Use the same bin edges for every class so the histograms can be compared.
 		edges = np.linspace(x[:, j].min(), x[:, j].max(), bins + 1)
 		hists = []
 		for c in range(len(CLASS_NAMES)):
@@ -169,6 +188,7 @@ def feature_overlap(x, y, bins):
 
 
 def feature_subset(scores, n_features):
+	# Pick the n features with the smallest overlap (kept in their original order).
 	return sorted(np.argsort(scores)[:n_features].tolist())
 
 
@@ -177,6 +197,7 @@ def feature_names(indices):
 
 
 def plot_histograms(x, y, path, bins):
+	# Per-feature histogram, one curve per class, to show feature separability.
 	fig, axes = plt.subplots(2, 2, figsize=(10, 7))
 	for ax, j in zip(axes.flat, range(4)):
 		for c, name in enumerate(CLASS_NAMES):
@@ -197,6 +218,7 @@ def plot_histograms(x, y, path, bins):
 
 
 def plot_training_curves(trained: Trained, path: Path, split_label: str) -> None:
+	# MSE and training error rate over the epochs of the best run.
 	fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 	ax1.plot(trained.mse_history, color="#1f6db0", linewidth=1.4)
 	ax1.set_xlabel("epoch")
@@ -215,10 +237,12 @@ def plot_training_curves(trained: Trained, path: Path, split_label: str) -> None
 
 
 def plot_decision_regions(x_train, y_train, feat_idx, alphas, max_epochs, tol, path):
+	# Retrain on just two features and shade the plane by predicted class.
 	x_sub = x_train[:, feat_idx]
 	x_sub_s = (x_sub - x_sub.mean(0)) / x_sub.std(0)
 	trained = train(x_sub_s, y_train, alphas, max_epochs, tol)
 
+	# Grid covering the data with a small margin around it.
 	pad = 0.5
 	g0 = np.linspace(x_sub_s[:, 0].min() - pad, x_sub_s[:, 0].max() + pad, 400)
 	g1 = np.linspace(x_sub_s[:, 1].min() - pad, x_sub_s[:, 1].max() + pad, 400)
@@ -254,6 +278,7 @@ def print_confusion_matrix(cm):
 
 
 def run_part_one(x, y, alphas, max_epochs, tol, figures_dir: Path):
+	# Train and evaluate the classifier on both Split A and Split B.
 	print("\n=== Part 1: two train/test splits ===")
 	results = []
 	splits = [
@@ -280,6 +305,7 @@ def run_part_one(x, y, alphas, max_epochs, tol, figures_dir: Path):
 
 
 def run_part_two(x, y, alphas, max_epochs, tol, bins, figures_dir: Path):
+	# Drop features one at a time (worst overlap first) and see how it affects accuracy.
 	print("\n=== Part 2: feature reduction ===")
 	x_tr, y_tr, x_te, y_te = classwise_split(x, y, 30, True)
 	plot_histograms(x_tr, y_tr, figures_dir / "feature_histograms.png", bins=bins)
@@ -309,6 +335,7 @@ def run_part_two(x, y, alphas, max_epochs, tol, bins, figures_dir: Path):
 
 
 def write_csvs(results_dir: Path, part1, part2, overlap):
+	# Save the numerical results from both parts as CSV files.
 	results_dir.mkdir(parents=True, exist_ok=True)
 	with (results_dir / "part1_summary.csv").open("w", newline="") as f:
 		w = csv.writer(f)
